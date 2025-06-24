@@ -587,7 +587,7 @@ class RWKV(pl.LightningModule):
         logits = self(idx)
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)), targets.view(-1))
-        return L2Wrap.apply(loss, logits)
+        return loss
 
     def training_step_end(self, batch_parts):
         all = self.all_gather(batch_parts)

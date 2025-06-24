@@ -215,9 +215,9 @@ class RWKV_Tmix_x070(nn.Module):
         # !!! notice eps value !!!
         self.ln_x = nn.GroupNorm(H, C, eps=64e-5)
 
-        self.receptance.weight.data.uniform_(-0.5 / (C*0.5), 0.5 / (C*0.5))
-        self.key.weight.data.uniform_(-0.05 / (C*0.5), 0.05 / (C*0.5))
-        self.value.weight.data.uniform_(-0.5 / (C*0.5), 0.5 / (C*0.5))
+        self.receptance.weight.data.uniform_(-0.5 / (C**0.5), 0.5 / (C**0.5))
+        self.key.weight.data.uniform_(-0.05 / (C**0.5), 0.05 / (C**0.5))
+        self.value.weight.data.uniform_(-0.5 / (C**0.5), 0.5 / (C**0.5))
         self.output.weight.data.zero_()
         del www, zigzag, linear, ddd
 

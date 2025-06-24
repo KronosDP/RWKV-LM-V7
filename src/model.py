@@ -285,7 +285,6 @@ class RationalFunction(nn.Module):
         # Polynomial coefficients
         self.p_coeffs = nn.Parameter(torch.randn(num_groups, degree_p + 1))
         self.q_coeffs = nn.Parameter(torch.randn(num_groups, degree_q + 1))
-        
         # Initialize q_coeffs for stability near x=0
         with torch.no_grad():
             self.q_coeffs[:, 0] = 1.0
@@ -301,14 +300,12 @@ class RationalFunction(nn.Module):
         q_powers = x.unsqueeze(-1) ** torch.arange(self.q_coeffs.shape[1], device=x.device)
         
         # Calculate numerator P(x) and denominator Q(x)
-        # Reshape coeffs to be broadcastable
-        p_coeffs = self.p_coeffs.view(1, 1, self.num_groups, 1, -1)
-        q_coeffs = self.q_coeffs.view(1, 1, self.num_groups, 1, -1)
-        
         # einsum for batched polynomial evaluation
         # b: batch, t: time, g: group, s: size, d: degree
-        numerator = torch.einsum('btgsd,ggd->btgs', p_powers, self.p_coeffs)
-        denominator = torch.einsum('btgsd,ggd->btgs', q_powers, self.q_coeffs)
+        # p_powers/q_powers: (B, T, num_groups, group_size, degree)
+        # p_coeffs/q_coeffs: (num_groups, degree)
+        numerator = torch.einsum('btgsd,gd->btgs', p_powers, self.p_coeffs)
+        denominator = torch.einsum('btgsd,gd->btgs', q_powers, self.q_coeffs)
         
         # Use safe pade activation unit style denominator
         y = numerator / (1 + torch.abs(denominator))

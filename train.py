@@ -89,6 +89,16 @@ if __name__ == "__main__":
         import deepspeed
     from pytorch_lightning import seed_everything
 
+    if (
+        args.precision == "bf16"
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability()[0] < 8
+    ):
+        rank_zero_info(
+            f"Your GPU with compute capability {torch.cuda.get_device_capability()} does not support bf16 natively. "
+            "Triton/torch.compile may fail. Disabling torch.compile."
+        )
+        args.compile = 0
     if args.random_seed >= 0:
         print(
             f"########## WARNING: GLOBAL SEED {args.random_seed} THIS WILL AFFECT MULTIGPU SAMPLING ##########\n"

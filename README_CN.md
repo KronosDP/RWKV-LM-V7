@@ -1,13 +1,14 @@
-
 <div align="center">
 
 # RWKV-LM-V7
-[![English](https://img.shields.io/badge/README-English-blue.svg)](./README.md) 
+
+[![English](https://img.shields.io/badge/README-English-blue.svg)](./README.md)
 [![中文](https://img.shields.io/badge/README-中文版本-red.svg)](./README_CN.md)
 
 </div>
 
 ## 项目介绍
+
 让任何研究者在 15 分钟内开始预训练一个完全对齐的 RWKV v7 模型。当然不包括下载数据 :) 。
 
 所有的代码来源于原始 RWKV-LM 项目：https://github.com/BlinkDL/RWKV-LM
@@ -25,16 +26,22 @@
 > [!WARNING]
 > Note: 整个仓库仍处于 WIP 阶段（与基线相比，我们改进了融合算子的使用，计算更高效）。如果您有所顾虑，则可以使用 [RWKV-LM](https://github.com/BlinkDL/RWKV-LM/tree/main/RWKV-v7/train_temp) 作为参考实现。
 
+> [!NOTE]
+> 对于使用计算能力低于 8.0 的 NVIDIA GPU（例如 V100, T4）的用户，`bfloat16` 不是原生支持的。训练脚本会自动禁用 `torch.compile` 以防止编译错误，这可能会导致训练速度变慢。为了在这些 GPU 上获得更好的性能，请考虑使用 `precision: 'fp16'`。
+
 ## 如何开始？
 
 ### 准备环境
 
 环境准备，请使用 miniforge 等 conda 兼容包管理器，创建一个全新的环境：
+
 ```
 conda create -n rwkv-lm-v7 python=3.12
 conda activate rwkv-lm-v7
 ```
+
 随后安装下列依赖，注意 `pytorch-lightning` 固定使用了 `1.9.5` 版本，此为本仓库特性，请不要升级此依赖包。
+
 ```
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 pip3 install -r requirements.txt
@@ -50,6 +57,7 @@ wget --continue -O data/minipile.bin https://huggingface.co/datasets/BlinkDL/min
 ### 开始训练
 
 1. 初始化空 RWKV-7 模型
+
 ```
 sh ./demo-training-prepare.sh
 ```
@@ -57,6 +65,7 @@ sh ./demo-training-prepare.sh
 2. 登录 WandB 账号
 
 3. 开始训练
+
 ```
 sh ./demo-training-run.sh
 ```
@@ -68,11 +77,13 @@ sh ./demo-training-run.sh
 RWKV-7 使用了包含经过设计和数学论证的初始化和基于训练结果分析的初始化，加速模型收敛及其性能。
 
 ### L2Warp
+
 此类惩罚模型，避免模型过度自信，从而缓解 BF16 中间的精度损失。
 
 ### 权重及其初始化样例
 
 请严格注意上下文学习率等相关设置：
+
 ```
 self.k_k = nn.Parameter(torch.zeros(1, 1, C)+0.71 - linear*0.1)
 self.k_a = nn.Parameter(torch.zeros(1, 1, C)+1.02)
@@ -80,50 +91,50 @@ self.k_a = nn.Parameter(torch.zeros(1, 1, C)+1.02)
 
 RWKV-7 weight example for 1.5B (L24-D2048, vocab 65536):
 
-| name                | shape         | comment      | initialization  |
-|---------------------|---------------|--------------|-----------------|
-| emb.weight          | [65536, 2048] | wdecay       | see code        |
-| blocks.0.ln0.weight | [2048]        | for layer 0  | 1               |
-| blocks.0.ln0.bias   | [2048]        | for layer 0  | 0               |
-|                     |               |              |                 |
-| blocks.*.ln1.weight | [2048]        |              | 1               |
-| blocks.*.ln1.bias   | [2048]        |              | 0               |
-| blocks.*.att.x_r    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.x_w    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.x_k    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.x_v    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.x_a    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.x_g    | [1, 1, 2048]  |              | see code        |
-| blocks.*.att.w0     | [1, 1, 2048]  | lr 2x        | see code        |
-| blocks.*.att.w1     | [2048, 96]    |              | 0               |
-| blocks.*.att.w2     | [96, 2048]    |              | see code        |
-| blocks.*.att.a0     | [1, 1, 2048]  |              | 0               |
-| blocks.*.att.a1     | [2048, 96]    |              | 0               |
-| blocks.*.att.a2     | [96, 2048]    |              | see code        |
-| blocks.*.att.v0     | [1, 1, 2048]  | for layer 1+ | 1               |
-| blocks.*.att.v1                | [2048, 64]   | for layer 1+ | 0         |
-| blocks.*.att.v2                | [64, 2048]   | for layer 1+ | see code  |
-| blocks.*.att.g1                | [2048, 256]  |              | 0         |
-| blocks.*.att.g2                | [256, 2048]  |              | see code  |
-| blocks.*.att.k_k               | [1, 1, 2048] |              | 1         |
-| blocks.*.att.k_a               | [1, 1, 2048] |              | 1         |
-| blocks.*.att.r_k               | [32, 64]     |              | 0         |
-| blocks.*.att.receptance.weight | [2048, 2048] | wdecay       | see code  |
-| blocks.*.att.key.weight        | [2048, 2048] | wdecay       | see code  |
-| blocks.*.att.value.weight      | [2048, 2048] | wdecay       | see code  |
-| blocks.*.att.output.weight     | [2048, 2048] | wdecay       | 0         |
-| blocks.*.att.ln_x.weight       | [2048]       |              | see code  |
-| blocks.*.att.ln_x.bias         | [2048]       |              | 0         |
-|                                |              |              |           |
-| blocks.*.ln2.weight            | [2048]       |              | 1         |
-| blocks.*.ln2.bias              | [2048]       |              | 0         |
-| blocks.*.ffn.x_k               | [1, 1, 2048] |              | see code  |
-| blocks.*.ffn.key.weight        | [8192, 2048] | wdecay       | see code  |
-| blocks.*.ffn.value.weight      | [2048, 8192] | wdecay       | 0         |
-|                                |              |              |           |
-| ln_out.weight | [2048]        |        | 1         |
-| ln_out.bias   | [2048]        |        | 0         |
-| head.weight   | [65536, 2048] | wdecay | see code  |
+| name                            | shape         | comment      | initialization |
+| ------------------------------- | ------------- | ------------ | -------------- |
+| emb.weight                      | [65536, 2048] | wdecay       | see code       |
+| blocks.0.ln0.weight             | [2048]        | for layer 0  | 1              |
+| blocks.0.ln0.bias               | [2048]        | for layer 0  | 0              |
+|                                 |               |              |                |
+| blocks.\*.ln1.weight            | [2048]        |              | 1              |
+| blocks.\*.ln1.bias              | [2048]        |              | 0              |
+| blocks.\*.att.x_r               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.x_w               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.x_k               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.x_v               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.x_a               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.x_g               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.att.w0                | [1, 1, 2048]  | lr 2x        | see code       |
+| blocks.\*.att.w1                | [2048, 96]    |              | 0              |
+| blocks.\*.att.w2                | [96, 2048]    |              | see code       |
+| blocks.\*.att.a0                | [1, 1, 2048]  |              | 0              |
+| blocks.\*.att.a1                | [2048, 96]    |              | 0              |
+| blocks.\*.att.a2                | [96, 2048]    |              | see code       |
+| blocks.\*.att.v0                | [1, 1, 2048]  | for layer 1+ | 1              |
+| blocks.\*.att.v1                | [2048, 64]    | for layer 1+ | 0              |
+| blocks.\*.att.v2                | [64, 2048]    | for layer 1+ | see code       |
+| blocks.\*.att.g1                | [2048, 256]   |              | 0              |
+| blocks.\*.att.g2                | [256, 2048]   |              | see code       |
+| blocks.\*.att.k_k               | [1, 1, 2048]  |              | 1              |
+| blocks.\*.att.k_a               | [1, 1, 2048]  |              | 1              |
+| blocks.\*.att.r_k               | [32, 64]      |              | 0              |
+| blocks.\*.att.receptance.weight | [2048, 2048]  | wdecay       | see code       |
+| blocks.\*.att.key.weight        | [2048, 2048]  | wdecay       | see code       |
+| blocks.\*.att.value.weight      | [2048, 2048]  | wdecay       | see code       |
+| blocks.\*.att.output.weight     | [2048, 2048]  | wdecay       | 0              |
+| blocks.\*.att.ln_x.weight       | [2048]        |              | see code       |
+| blocks.\*.att.ln_x.bias         | [2048]        |              | 0              |
+|                                 |               |              |                |
+| blocks.\*.ln2.weight            | [2048]        |              | 1              |
+| blocks.\*.ln2.bias              | [2048]        |              | 0              |
+| blocks.\*.ffn.x_k               | [1, 1, 2048]  |              | see code       |
+| blocks.\*.ffn.key.weight        | [8192, 2048]  | wdecay       | see code       |
+| blocks.\*.ffn.value.weight      | [2048, 8192]  | wdecay       | 0              |
+|                                 |               |              |                |
+| ln_out.weight                   | [2048]        |              | 1              |
+| ln_out.bias                     | [2048]        |              | 0              |
+| head.weight                     | [65536, 2048] | wdecay       | see code       |
 
 ## 检查结果
 

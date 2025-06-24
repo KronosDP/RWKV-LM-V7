@@ -122,8 +122,8 @@ if "x070" in os.environ["RWKV_MY_TESTING"]:
 
 class RWKV_Tmix_x070(nn.Module):
     @torch.no_grad()
-    def __init__(self, args, layer_id):
-        super().__init__()
+    def _init_(self, args, layer_id):
+        super()._init_()
         self.args = args
         self.layer_id = layer_id
         self.my_testing = args.my_testing
@@ -215,9 +215,9 @@ class RWKV_Tmix_x070(nn.Module):
         # !!! notice eps value !!!
         self.ln_x = nn.GroupNorm(H, C, eps=64e-5)
 
-        self.receptance.weight.data.uniform_(-0.5 / (C**0.5), 0.5 / (C**0.5))
-        self.key.weight.data.uniform_(-0.05 / (C**0.5), 0.05 / (C**0.5))
-        self.value.weight.data.uniform_(-0.5 / (C**0.5), 0.5 / (C**0.5))
+        self.receptance.weight.data.uniform_(-0.5 / (C*0.5), 0.5 / (C*0.5))
+        self.key.weight.data.uniform_(-0.05 / (C*0.5), 0.05 / (C*0.5))
+        self.value.weight.data.uniform_(-0.5 / (C*0.5), 0.5 / (C*0.5))
         self.output.weight.data.zero_()
         del www, zigzag, linear, ddd
 
@@ -260,38 +260,126 @@ class RWKV_Tmix_x070(nn.Module):
         x = self.output(x * g)
         return x, v_first
 
+#################################################################
+class RationalFunction(nn.Module):
+    """
+    Rational Function as a learnable activation function.
+    Parameterized as P(x)/Q(x) where P and Q are polynomials.
+    """
+    def _init_(self, in_features, out_features, num_groups, degree_p, degree_q):
+        super()._init_()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_groups = num_groups
+        self.group_size = in_features // num_groups
+        assert in_features % num_groups == 0, "in_features must be divisible by num_groups"
+
+        # Polynomial coefficients
+        self.p_coeffs = nn.Parameter(torch.randn(num_groups, degree_p + 1))
+        self.q_coeffs = nn.Parameter(torch.randn(num_groups, degree_q + 1))
+        
+        # Initialize q_coeffs for stability near x=0
+        with torch.no_grad():
+            self.q_coeffs[:, 0] = 1.0
+            self.q_coeffs[:, 1:] = 0.01 * self.q_coeffs[:, 1:]
+
+    def forward(self, x):
+        # x shape: (B, T, C)
+        B, T, C = x.shape
+        x = x.view(B, T, self.num_groups, self.group_size)
+        
+        # Prepare powers of x, from x^0 to x^degree
+        p_powers = x.unsqueeze(-1) ** torch.arange(self.p_coeffs.shape[1], device=x.device)
+        q_powers = x.unsqueeze(-1) ** torch.arange(self.q_coeffs.shape[1], device=x.device)
+        
+        # Calculate numerator P(x) and denominator Q(x)
+        # Reshape coeffs to be broadcastable
+        p_coeffs = self.p_coeffs.view(1, 1, self.num_groups, 1, -1)
+        q_coeffs = self.q_coeffs.view(1, 1, self.num_groups, 1, -1)
+        
+        # einsum for batched polynomial evaluation
+        # b: batch, t: time, g: group, s: size, d: degree
+        numerator = torch.einsum('btgsd,ggd->btgs', p_powers, self.p_coeffs)
+        denominator = torch.einsum('btgsd,ggd->btgs', q_powers, self.q_coeffs)
+        
+        # Use safe pade activation unit style denominator
+        y = numerator / (1 + torch.abs(denominator))
+        
+        return y.view(B, T, C)
+
+
 
 #################################################################
 
 
-class RWKV_CMix_x070(nn.Module):
-    @torch.no_grad()
-    def __init__(self, args, layer_id):
-        super().__init__()
+class RWKV_CMix_GR_KAN(nn.Module):
+    """
+    A GR-KAN replacement for the FFN (Channel Mixing) block.
+    """
+    def _init_(self, args, layer_id):
+        super()._init_()
         self.args = args
         self.layer_id = layer_id
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
 
-        ratio_1_to_almost0 = 1.0 - (layer_id / args.n_layer)  # 1 to ~0
-        ddd = torch.ones(1, 1, args.n_embd)
-        for i in range(args.n_embd):
-            ddd[0, 0, i] = i / args.n_embd
-        self.x_k = nn.Parameter(1.0 - torch.pow(ddd, ratio_1_to_almost0**4))
+        # Define rational function parameters
+        num_groups = 16  # Hyperparameter: number of groups for parameter sharing
+        poly_degree = 3  # Hyperparameter: degree of polynomials in rational function
 
-        self.key = nn.Linear(args.n_embd, args.n_embd * 4, bias=False)
-        self.value = nn.Linear(args.n_embd * 4, args.n_embd, bias=False)
+        hidden_dim = args.dim_ffn
 
-        self.key.weight.data.uniform_(
-            -0.5 / (args.n_embd**0.5), 0.5 / (args.n_embd**0.5)
-        )
-        self.value.weight.data.zero_()
+        # First GR-KAN layer
+        self.ln1 = nn.LayerNorm(args.n_embd)
+        self.rational1 = RationalFunction(args.n_embd, hidden_dim, num_groups, poly_degree, poly_degree)
+        self.linear1 = nn.Linear(args.n_embd, hidden_dim, bias=False)
+
+        # Second GR-KAN layer
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.rational2 = RationalFunction(hidden_dim, args.n_embd, num_groups, poly_degree, poly_degree)
+        self.linear2 = nn.Linear(hidden_dim, args.n_embd, bias=False)
+        
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Initialize linear layers
+        nn.init.orthogonal_(self.linear1.weight, gain=1.0)
+        nn.init.zeros_(self.linear2.weight)
+
+        # Initialize rational functions
+        # Layer 1: Approximates Identity
+        with torch.no_grad():
+            self.rational1.p_coeffs.zero_()
+            self.rational1.p_coeffs[:, 1] = 1.0 # P(x) = x
+            self.rational1.q_coeffs.zero_()
+            self.rational1.q_coeffs[:, 0] = 1.0 # Q(x) = 1
+        
+        # Layer 2: Approximates ReLU^2
+        with torch.no_grad():
+            self.rational2.p_coeffs.zero_()
+            self.rational2.p_coeffs[:, 2] = 1.0 # P(x) = x^2
+            self.rational2.q_coeffs.zero_()
+            self.rational2.q_coeffs[:, 0] = 1.0 # Q(x) = 1
+            # For negative inputs, P(x) will be positive, mimicking ReLU^2.
+            # This is a rough approximation; the network will learn a better one.
 
     @CompileFunction
     def forward(self, x):
-        xx = token_shift(x)
-        k = torch.addcmul(x, xx, self.x_k)
-        k = torch.relu(self.key(k)) ** 2
-        return self.value(k)
+        # Apply the same token shift as the original FFN
+        x_shifted = self.time_shift(x)
+        # No lerp for simplicity, direct residual connection
+        
+        # Layer 1
+        x_ln1 = self.ln1(x_shifted)
+        x_rat1 = self.rational1(x_ln1)
+        x_lin1 = self.linear1(x_rat1)
+
+        # Layer 2
+        x_ln2 = self.ln2(x_lin1)
+        x_rat2 = self.rational2(x_ln2)
+        x_lin2 = self.linear2(x_rat2)
+
+        return x_lin2
+
 
 
 #################################################################
@@ -300,8 +388,8 @@ class RWKV_CMix_x070(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, args, layer_id):
-        super().__init__()
+    def _init_(self, args, layer_id):
+        super()._init_()
         self.args = args
         self.layer_id = layer_id
 
@@ -312,7 +400,7 @@ class Block(nn.Module):
             self.ln0 = nn.LayerNorm(args.n_embd)
 
         self.att = RWKV_Tmix_x070(args, layer_id)
-        self.ffn = RWKV_CMix_x070(args, layer_id)
+        self.ffn = RWKV_CMix_GR_KAN(args, layer_id)
 
     @CompileFunction
     def forward(self, x, v_first):
@@ -344,12 +432,12 @@ class L2Wrap(torch.autograd.Function):
 
 
 class RWKV(pl.LightningModule):
-    def __init__(self, args):
-        super().__init__()
+    def _init_(self, args):
+        super()._init_()
         self.args = args
         if not hasattr(args, "dim_att"):
             args.dim_att = args.n_embd
-        # Set a sane default when the flag is missing *or* non-positive
+        # Set a sane default when the flag is missing or non-positive
         if not hasattr(args, "dim_ffn") or args.dim_ffn <= 0:
             # RWKV-7 uses 4x emb size, RWKV-6 uses 3.5x emb size
             multiplier = 4 if args.my_testing == "x070" else 3.5
@@ -375,10 +463,10 @@ class RWKV(pl.LightningModule):
         for n, p in self.named_parameters():
             if "att.w0" in n:
                 lr_2x.add(n)
+            # Add all other weights, including our new KAN parameters, to the decay group
             elif (
                 (len(p.squeeze().shape) >= 2)
                 and (args.weight_decay > 0)
-                and (".weight" in n)
             ):
                 lr_decay.add(n)
             else:

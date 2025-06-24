@@ -48,7 +48,7 @@ DATA_FILE="data/minipile"
 DATA_TYPE="binidx"
 #
 python train.py \
- --wandb "" \
+ --wandb "Test" \
  --accelerator gpu \
  --adam_eps 1e-18 \
  --beta1 0.9 \

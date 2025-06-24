@@ -104,7 +104,9 @@ if "x070" in os.environ["RWKV_MY_TESTING"]:
             sa = torch.empty(B, T, H, C, dtype=torch.float32, device=w.device)
             torch.ops.wind_backstepping.forward(w, q, k, v, z, b, y, s, sa)
             ctx.save_for_backward(w, q, k, v, z, b, s, sa)
-            return y        @staticmethod
+            return y
+
+        @staticmethod
         def backward(ctx, dy):
             assert all(i.dtype == RWKV_DTYPE for i in [dy])
             assert all(i.is_contiguous() for i in [dy])

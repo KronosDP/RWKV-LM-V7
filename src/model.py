@@ -296,16 +296,19 @@ class RationalFunction(nn.Module):
         x = x.view(B, T, self.num_groups, self.group_size)
         
         # Prepare powers of x, from x^0 to x^degree
-        p_powers = x.unsqueeze(-1) ** torch.arange(self.p_coeffs.shape[1], device=x.device)
-        q_powers = x.unsqueeze(-1) ** torch.arange(self.q_coeffs.shape[1], device=x.device)
+        p_degree = self.p_coeffs.shape[1]
+        q_degree = self.q_coeffs.shape[1]
+        
+        # Create power tensors: x^0, x^1, x^2, ...
+        p_powers = x.unsqueeze(-1) ** torch.arange(p_degree, device=x.device, dtype=x.dtype)
+        q_powers = x.unsqueeze(-1) ** torch.arange(q_degree, device=x.device, dtype=x.dtype)
         
         # Calculate numerator P(x) and denominator Q(x)
-        # einsum for batched polynomial evaluation
-        # b: batch, t: time, g: group, s: size, d: degree
         # p_powers/q_powers: (B, T, num_groups, group_size, degree)
         # p_coeffs/q_coeffs: (num_groups, degree)
-        numerator = torch.einsum('btgsd,gd->btgs', p_powers, self.p_coeffs)
-        denominator = torch.einsum('btgsd,gd->btgs', q_powers, self.q_coeffs)
+        # We want to sum over the degree dimension
+        numerator = torch.sum(p_powers * self.p_coeffs.unsqueeze(0).unsqueeze(0).unsqueeze(-2), dim=-1)
+        denominator = torch.sum(q_powers * self.q_coeffs.unsqueeze(0).unsqueeze(0).unsqueeze(-2), dim=-1)
         
         # Use safe pade activation unit style denominator
         y = numerator / (1 + torch.abs(denominator))

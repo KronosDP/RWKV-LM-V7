@@ -122,8 +122,8 @@ if "x070" in os.environ["RWKV_MY_TESTING"]:
 
 class RWKV_Tmix_x070(nn.Module):
     @torch.no_grad()
-    def _init_(self, args, layer_id):
-        super()._init_()
+    def __init__(self, args, layer_id):
+        super().__init__()
         self.args = args
         self.layer_id = layer_id
         self.my_testing = args.my_testing
@@ -266,8 +266,8 @@ class RationalFunction(nn.Module):
     Rational Function as a learnable activation function.
     Parameterized as P(x)/Q(x) where P and Q are polynomials.
     """
-    def _init_(self, in_features, out_features, num_groups, degree_p, degree_q):
-        super()._init_()
+    def __init__(self, in_features, out_features, num_groups, degree_p, degree_q):
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.num_groups = num_groups
@@ -316,8 +316,8 @@ class RWKV_CMix_GR_KAN(nn.Module):
     """
     A GR-KAN replacement for the FFN (Channel Mixing) block.
     """
-    def _init_(self, args, layer_id):
-        super()._init_()
+    def __init__(self, args, layer_id):
+        super().__init__()
         self.args = args
         self.layer_id = layer_id
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
@@ -388,8 +388,8 @@ class RWKV_CMix_GR_KAN(nn.Module):
 
 
 class Block(nn.Module):
-    def _init_(self, args, layer_id):
-        super()._init_()
+    def __init__(self, args, layer_id):
+        super().__init__()
         self.args = args
         self.layer_id = layer_id
 
@@ -432,8 +432,8 @@ class L2Wrap(torch.autograd.Function):
 
 
 class RWKV(pl.LightningModule):
-    def _init_(self, args):
-        super()._init_()
+    def __init__(self, args):
+        super().__init__()
         self.args = args
         if not hasattr(args, "dim_att"):
             args.dim_att = args.n_embd

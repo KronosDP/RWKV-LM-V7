@@ -44,6 +44,14 @@ if os.environ["RWKV_COMPILE_ON"] == "1":
 
 HEAD_SIZE = int(os.environ["RWKV_HEAD_SIZE"])
 
+# Determine the appropriate dtype based on float mode
+if os.environ.get("RWKV_FLOAT_MODE", "bf16") == "fp16":
+    RWKV_DTYPE = torch.float16
+elif os.environ.get("RWKV_FLOAT_MODE", "bf16") == "bf16":
+    RWKV_DTYPE = torch.bfloat16
+else:
+    RWKV_DTYPE = torch.float32
+
 if "x070" in os.environ["RWKV_MY_TESTING"]:
     CHUNK_LEN = 16
 
@@ -87,7 +95,7 @@ if "x070" in os.environ["RWKV_MY_TESTING"]:
         def forward(ctx, w, q, k, v, z, b):
             B, T, H, C = w.shape
             assert T % CHUNK_LEN == 0
-            assert all(i.dtype == torch.bfloat16 for i in [w, q, k, v, z, b])
+            assert all(i.dtype == RWKV_DTYPE for i in [w, q, k, v, z, b])
             assert all(i.is_contiguous() for i in [w, q, k, v, z, b])
             y = torch.empty_like(v)
             s = torch.empty(
@@ -96,11 +104,9 @@ if "x070" in os.environ["RWKV_MY_TESTING"]:
             sa = torch.empty(B, T, H, C, dtype=torch.float32, device=w.device)
             torch.ops.wind_backstepping.forward(w, q, k, v, z, b, y, s, sa)
             ctx.save_for_backward(w, q, k, v, z, b, s, sa)
-            return y
-
-        @staticmethod
+            return y        @staticmethod
         def backward(ctx, dy):
-            assert all(i.dtype == torch.bfloat16 for i in [dy])
+            assert all(i.dtype == RWKV_DTYPE for i in [dy])
             assert all(i.is_contiguous() for i in [dy])
             w, q, k, v, z, b, s, sa = ctx.saved_tensors
             dw, dq, dk, dv, dz, db = [torch.empty_like(x) for x in [

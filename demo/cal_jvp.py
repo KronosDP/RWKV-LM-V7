@@ -6,7 +6,7 @@ from torch.utils.cpp_extension import load
 os.environ["RWKV_HEAD_SIZE"] = "64"
 os.environ["RWKV_MY_TESTING"] = "x070"
 os.environ["RWKV_COMPILE_ON"] = "0"
-os.environ["RWKV_FLOAT_MODE"] = "bf16"
+os.environ["RWKV_FLOAT_MODE"] = "fp16"
 
 ROCm_flag = torch.version.hip is not None
 
@@ -70,7 +70,7 @@ class WindBackstepping(torch.autograd.Function):
     def forward(ctx, w, q, k, v, z, b):
         B, T, H, C = w.shape
         assert T % CHUNK_LEN == 0
-        assert all(i.dtype == torch.bfloat16 for i in [w, q, k, v, z, b])
+        assert all(i.dtype == torch.float16 for i in [w, q, k, v, z, b])
         assert all(i.is_contiguous() for i in [w, q, k, v, z, b])
 
         y = torch.empty_like(v)
@@ -85,11 +85,9 @@ class WindBackstepping(torch.autograd.Function):
             torch.ops.wind_backstepping.forward(w, q, k, v, z, b, y, s, sa)
 
         ctx.save_for_backward(w, q, k, v, z, b, s, sa)
-        return y
-
-    @staticmethod
+        return y    @staticmethod
     def backward(ctx, dy):
-        assert all(i.dtype == torch.bfloat16 for i in [dy])
+        assert all(i.dtype == torch.float16 for i in [dy])
         assert all(i.is_contiguous() for i in [dy])
 
         w, q, k, v, z, b, s, sa = ctx.saved_tensors
@@ -132,12 +130,12 @@ if __name__ == "__main__":
     C = HEAD_SIZE
     HC = H * C
 
-    q_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
-    w_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
-    k_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
-    v_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
-    a_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
-    b_input = torch.rand(B, T, HC, dtype=torch.bfloat16, device="cuda")
+    q_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
+    w_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
+    k_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
+    v_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
+    a_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
+    b_input = torch.rand(B, T, HC, dtype=torch.float16, device="cuda")
 
     vq_input = torch.rand_like(q_input)
     vw_input = torch.rand_like(w_input)
